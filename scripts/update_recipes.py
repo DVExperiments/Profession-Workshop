@@ -15,13 +15,13 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / 'data' / 'recipes.json'
-PROFESSIONS = ['Alchemy','Blacksmithing','Enchanting','Engineering','Leatherworking','Tailoring','Cooking','First Aid','Mining','Herbalism','Skinning','Fishing']
+PROFESSIONS = ['Alchemy','Blacksmithing','Enchanting','Engineering','Leatherworking','Tailoring','Cooking','First Aid']
 MARKET = os.environ.get('AHL_MARKET', 'forever.pvp.horde.us')
 BASE = 'https://api.ahledger.com/v1/crafting/'
 
 
 def fetch(profession):
-    params=urllib.parse.urlencode({'profession': profession, 'all': '1', 'limit': '5000'})
+    params=urllib.parse.urlencode({'profession': profession, 'all': '1'})
     url=BASE + urllib.parse.quote(MARKET, safe='.') + '?' + params
     req=urllib.request.Request(url, headers={'User-Agent':'ProfessionWorkshop/0.3 (GitHub Pages recipe mirror; attribution on every page)', 'Accept':'application/json'})
     for attempt in range(3):
