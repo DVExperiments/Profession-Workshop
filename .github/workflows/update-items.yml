@@ -1,0 +1,31 @@
+name: Update Forever item information
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '43 7 * * *'
+permissions:
+  contents: write
+concurrency:
+  group: profession-workshop-item-update
+  cancel-in-progress: false
+jobs:
+  update-items:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Enrich recipe items from public AHledger API
+        run: python scripts/update_items.py
+      - name: Commit item snapshot if changed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/items.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update Forever item metadata snapshot'
+            git push
+          fi
