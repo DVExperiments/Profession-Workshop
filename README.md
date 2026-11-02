@@ -80,3 +80,10 @@ If you see an HTTP 404 for a file, check that `data/recipes.json`, `journal.css`
 Reference: https://www.wow-professions.com/forever/disenchanting-guide and https://forevermastery.com/en/tools/disenchant ; Classic bags https://www.wowhead.com/classic/guide/classic-wow-bags-storage ; Forever bag caveat https://senseos.gg/guides/wow-forever/bags-and-bank/ .
 
 **Publishing:** upload the v0.7 ZIP contents, but keep your current `data/recipes.json` untouched (it is intentionally excluded from the upgrade ZIP). No additional API keys or GitHub Actions changes are needed.
+
+## v0.8 — Item tooltips and Favourite Recipes
+
+- Hover or focus an item icon or crafting-tree node to view a WoW-inspired tooltip; click/tap to pin it. The tooltip shows known recipe reagents, recipe skill/yield, stored bag/bank quantities and recipe uses. Use **Add item details** to enter your own game-verified effects, stats or bag slot count. These personal notes are clearly labelled and are not inserted into the official catalog.
+- The **★ Favourite** button on the selected recipe saves or removes a quick-access shortcut. The **Favourite Recipes** page supports search, profession filtering, opening a recipe and removing it.
+- Favourites and personal item tooltip notes live in browser localStorage and travel with Backup / Restore. The existing `data/recipes.json` file is intentionally **not included in the v0.8 ZIP**, so uploading the update does not replace your 2,144-recipe live snapshot.
+- This update does not claim to contain an authoritative Forever item stat/effect database. The AHledger recipe catalog contains crafting information; unknown effects are left unknown unless you add your own observation.
