@@ -293,14 +293,16 @@ function itemRelations(name,id){
 }
 function itemInformationHTML(name,id){
  const data=itemRecord(name,id), {made,used}=itemRelations(name,id), key=tooltipKey(name,id), notes=state.itemNotes[key]||state.itemNotes['name:'+String(name).toLowerCase()]||'';
- const label=data?'AHledger Forever item data':'Item metadata not imported';
+ const label=data?(data.tooltipLines?.length?'Item tooltip · Forever Companion':data.source+' item record'):'Item metadata not imported';
  const props=data?detailLines(data):'';
  const extra=data?[['Use effect',data.useEffect],['Equip effect',data.equipEffect],['Description',data.description],['Binding',data.binding]].filter(x=>x[1]).map(([k,v])=>`<p><b>${esc(k)}:</b> ${esc(v)}</p>`).join(''):'';
  const usedBy=used.slice(0,12).map(r=>`<button class="recipeJump" data-library-recipe="${esc(r.key)}">${esc(r.name)}</button>`).join('');
  const crafted=made.slice(0,8).map(r=>`<button class="recipeJump" data-library-recipe="${esc(r.key)}">${esc(r.profession)} · ${esc(r.name)}</button>`).join('');
  const link=(data?.sourceUrl|| (id?'https://ahledger.com/items/'+encodeURIComponent(id):'https://ahledger.com/items'));
+ const tooltipRows=Array.isArray(data?.tooltipLines)?data.tooltipLines.map(line=>`<div class="codexTooltipLine ${esc(line.kind||'plain')}"><span>${esc(line.left||'')}</span>${line.right?`<span>${esc(line.right)}</span>`:''}</div>`).join(''):'';
+ const tooltipPanel=tooltipRows?`<div class="detailGroup"><b>In-game tooltip · Forever Companion</b><div class="codexTooltipBox">${tooltipRows}</div><small>Community/client sourced; verify against the live Forever client.</small></div>`:'';
  const general=data?.bagSlots!=null?`<p><b>Bag capacity:</b> ${esc(String(data.bagSlots))} slots, reported by imported item data.</p>`:'';
- return `<h3>${esc(name)}</h3><span class="codexBadge">${esc(label)}</span>${data?`<span class="codexBadge">#${esc(data.id)}</span>`:''}<div class="detailGroup"><b>Item properties</b><div class="detailGrid">${props||'<div>Detailed properties are not yet available in the item snapshot.</div>'}</div>${general}${extra}</div><div class="detailGroup"><b>Crafting relationships</b><p>${made.length} producing recipe${made.length===1?'':'s'} · ${used.length} consuming recipe${used.length===1?'':'s'}</p>${crafted}${usedBy||'<p>No known recipe relationships beyond the current catalog.</p>'}</div>${notes?`<div class="detailGroup"><b>Your personal in-game notes</b><p>${esc(notes)}</p></div>`:''}<div class="detailGroup"><a href="${link}" target="_blank" rel="noopener noreferrer">View AHledger item page ↗</a><p class="sourceHint">${data?'Imported Forever item fields; fields not supplied by the API are left blank.':'No item details downloaded yet. The scheduled GitHub Action enriches recipe items incrementally.'} Item balance and effects may change between client builds.</p></div>`;
+ return `<h3>${esc(name)}</h3><span class="codexBadge">${esc(label)}</span>${data?`<span class="codexBadge">#${esc(data.id)}</span>`:''}<div class="detailGroup"><b>Item properties</b><div class="detailGrid">${props||'<div>Basic properties unavailable from the current source. Some items may still have tooltip lines below.</div>'}</div>${general}${extra}</div>${tooltipPanel}<div class="detailGroup"><b>Crafting relationships</b><p>${made.length} producing recipe${made.length===1?'':'s'} · ${used.length} consuming recipe${used.length===1?'':'s'}</p>${crafted}${usedBy||'<p>No known recipe relationships beyond the current catalog.</p>'}</div>${notes?`<div class="detailGroup"><b>Your personal in-game notes</b><p>${esc(notes)}</p></div>`:''}<div class="detailGroup"><a href="${link}" target="_blank" rel="noopener noreferrer">View AHledger item page ↗</a><p class="sourceHint">${data?'Imported Forever item fields; fields not supplied by the API are left blank.':'No item details downloaded yet. The scheduled GitHub Action enriches recipe items incrementally.'} Item balance and effects may change between client builds.</p></div>`;
 }
 function buildLibraryIndex(){
  const map=new Map();
@@ -335,7 +337,9 @@ async function loadItemData(){
   importedItems=new Map();importedNames=new Map();
   for(const entry of raw.items){if(!entry||!entry.id||!entry.name)continue;
    importedItems.set(String(entry.id),entry);importedNames.set(entry.name.toLowerCase(),entry);}
-  itemMetadataStatus=importedItems.size.toLocaleString()+' item records from AHledger';
+  const tooltipCount=[...importedItems.values()].filter(v=>Array.isArray(v.tooltipLines)&&v.tooltipLines.length).length;
+   const propertiesCount=[...importedItems.values()].filter(v=>detailLines(v)).length;
+   itemMetadataStatus=importedItems.size.toLocaleString()+' item records · '+propertiesCount.toLocaleString()+' with properties · '+tooltipCount.toLocaleString()+' with actual tooltip lines';
  } catch(e){itemMetadataStatus='Item snapshot unavailable ('+e.message+')';}
  buildLibraryIndex();renderItemLibrary();
  if(activePage==='workshop')renderPlan();
@@ -358,7 +362,7 @@ tooltipMarkup=function(name,id){
  const html=_previousTooltipMarkup(name,id), item=itemRecord(name,id);
  if(!item)return html;
  const fields=detailLines(item);
- const extra=[item.description,item.useEffect&&'Use: '+item.useEffect,item.equipEffect&&'Equip: '+item.equipEffect].filter(Boolean).map(s=>`<div class="tipStat sourceStat">${esc(s)}</div>`).join('');
+ const extra=[item.description,item.useEffect&&'Use: '+item.useEffect,item.equipEffect&&'Equip: '+item.equipEffect].filter(Boolean).map(s=>`<div class="tipStat sourceStat">${esc(s)}</div>`).join('')+(Array.isArray(item.tooltipLines)?item.tooltipLines.slice(0,20).map(l=>`<div class="tipStat">${esc(l.left||'')} ${esc(l.right||'')}</div>`).join(''):'');
  const inserted=`<div class="tipDivider"></div><div class="tipLabel">Forever item information · AHledger</div><div class="tipStat">${fields||'Basic item record available'}</div>${extra}`;
  return html.replace('<div class="tipDivider"></div>',inserted+'<div class="tipDivider"></div>');
 };
@@ -367,8 +371,9 @@ itemDetailsHTML=function(name,profession=''){
  const r=allRecipes().find(r=>r.name.toLowerCase()===String(name).toLowerCase()),data=itemRecord(name,r?.itemId);
  if(!data)return _previousItemDetailsHTML(name,profession);
  const {used}=itemRelations(name,r?.itemId);
+ const tooltipRows=Array.isArray(data.tooltipLines)?data.tooltipLines.map(l=>`<div class="codexTooltipLine"><span>${esc(l.left||'')}</span>${l.right?`<span>${esc(l.right)}</span>`:''}</div>`).join(''):'';
  const bits=detailLines(data);
- return `<div class="itemDetailHead"><strong>What does this item do?</strong><span class="token">AHledger Forever item record</span></div><div class="detailGrid">${bits||'Basic item record · detailed effects not provided'}</div>${data.description?`<p>${esc(data.description)}</p>`:''}${data.useEffect?`<p><b>Use:</b> ${esc(data.useEffect)}</p>`:''}${data.equipEffect?`<p><b>Equip:</b> ${esc(data.equipEffect)}</p>`:''}<small>Used by ${used.length} recipes · <a href="${data.sourceUrl}" target="_blank" rel="noopener noreferrer">AHledger item ↗</a> · Missing stats are unknown, not zero.</small>`;
+ return `<div class="itemDetailHead"><strong>What does this item do?</strong><span class="token">${esc(data.source||'Item source')}</span></div><div class="detailGrid">${bits||'Basic properties not available'}</div>${tooltipRows?`<div class="codexTooltipBox">${tooltipRows}</div>`:''}${data.description?`<p>${esc(data.description)}</p>`:''}${data.useEffect?`<p><b>Use:</b> ${esc(data.useEffect)}</p>`:''}${data.equipEffect?`<p><b>Equip:</b> ${esc(data.equipEffect)}</p>`:''}<small>Used by ${used.length} recipes · <a href="${data.sourceUrl}" target="_blank" rel="noopener noreferrer">AHledger item ↗</a> · Missing stats are unknown, not zero.</small>`;
 };
 const _previousApplyCatalog=applyCatalog;
 applyCatalog=function(raw,from){_previousApplyCatalog(raw,from);buildLibraryIndex();renderItemLibrary()};

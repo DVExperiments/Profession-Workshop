@@ -25,7 +25,13 @@ def normalize(raw, item_id):
     """Conservative extraction; fields without upstream evidence stay absent."""
     if not isinstance(raw, dict):
         return None
-    obj = raw.get('item') if isinstance(raw.get('item'), dict) else raw
+    obj = raw
+    # Public APIs may wrap a record in data, item or result.
+    for _ in range(3):
+        inner = next((obj.get(k) for k in ('item', 'data', 'result')
+                      if isinstance(obj.get(k), dict)), None)
+        if inner is None: break
+        obj = inner
     name = obj.get('name') or obj.get('itemName')
     if not isinstance(name, str) or not name.strip():
         return None
@@ -72,15 +78,54 @@ def fetch(item_id):
     with urlopen(req, timeout=18) as response:
         return json.load(response)
 
+COMPANION = 'https://forevercompanion.io/api/v1/items/{}'
+TOOLTIPS_PER_RUN = min(120, max(1, int(os.getenv('TOOLTIPS_PER_RUN', '45'))))
+
+def fetch_companion(item_id):
+    req = Request(COMPANION.format(item_id), headers={
+        'User-Agent': 'ProfessionWorkshop/1.0 (community item details; https://github.com/DVExperiments/Profession-Workshop)',
+        'Accept': 'application/json'})
+    with urlopen(req, timeout=18) as response:
+        return json.load(response)
+
+def companion_detail(raw, item_id):
+    if not isinstance(raw, dict): return None
+    obj = raw.get('data', raw)
+    if not isinstance(obj, dict): return None
+    if str(obj.get('id', obj.get('itemId', item_id))) != str(item_id): return None
+    tooltip = obj.get('tooltip')
+    lines = []
+    if isinstance(tooltip, list):
+        for line in tooltip[:35]:
+            if isinstance(line, dict) and isinstance(line.get('left'), str):
+                lines.append({'left':line['left'][:300],
+                              'right':str(line.get('right') or '')[:160],
+                              'kind':str(line.get('kind') or 'plain')[:30]})
+    if not lines: return None
+    return {'tooltipLines': lines, 'tooltipSource': 'Forever Companion',
+            'tooltipSourceUrl': 'https://forevercompanion.io/developers',
+            'tooltipConfidence': 'client/community-sourced'}
+
+def due_tooltip(item_id, now, previous):
+    try:
+        return now - dt.datetime.fromisoformat(previous[item_id]) > dt.timedelta(days=30)
+    except (KeyError, ValueError, TypeError):
+        return True
+
 def main():
     if not RECIPES.exists():
         sys.exit('Recipe file missing: run Update Forever recipe snapshot first')
     recipe_data = json.loads(RECIPES.read_text(encoding='utf-8'))
     ids = set()
+    names = {}
     for r in recipe_data.get('recipes', []):
         for item in [ {'id': r.get('itemId')}, *(r.get('ingredients') or []) ]:
             value = str(item.get('id', '') or '').strip()
-            if value.isdecimal() and int(value) > 0: ids.add(value)
+            if value.isdecimal() and int(value) > 0:
+                ids.add(value)
+                if item.get('name'): names[value] = item['name']
+        output_id = str(r.get('itemId') or '').strip()
+        if output_id.isdecimal() and r.get('name'): names[output_id] = r['name']
     if not ids:
         sys.exit('No numeric item IDs in recipe snapshot; refusing empty export')
     existing = {}
@@ -90,6 +135,8 @@ def main():
     old_unresolved = saved.get('unresolved', {}) if OUTPUT.exists() else {}
     if not isinstance(old_unresolved, dict): old_unresolved = {}
     unresolved = {str(k):str(v) for k,v in old_unresolved.items() if str(k) in ids}
+    tooltip_attempts = saved.get('tooltipAttempts', {}) if OUTPUT.exists() else {}
+    if not isinstance(tooltip_attempts, dict): tooltip_attempts = {}
     # Back off missing/error IDs for seven days instead of retrying them forever.
     now = dt.datetime.now(dt.timezone.utc)
     def due(item_id):
@@ -120,13 +167,46 @@ def main():
                 print('Source rate-limited; stopping this run to protect source.', flush=True)
                 break
         time.sleep(.35)
-    if new_count == 0 and not existing and failures == 0:
-        sys.exit('No items retrieved. Existing dataset left untouched.')
+    # Supplement AHledger with actual in-game tooltip lines where publicly catalogued.
+    # Forever Companion covers dungeon, quest and reputation items, not all recipes.
+    output_ids = {str(r.get('itemId')) for r in recipe_data.get('recipes', []) if str(r.get('itemId','')).isdecimal()}
+    tooltip_ids = [x for x in sorted(ids, key=lambda i:(i not in output_ids, int(i)))
+                   if not existing.get(x, {}).get('tooltipLines')
+                   and (x not in tooltip_attempts or due_tooltip(x, now, tooltip_attempts))]
+    tooltip_added = 0
+    tooltip_missing = 0
+    for item_id in tooltip_ids[:TOOLTIPS_PER_RUN]:
+        try:
+            more = companion_detail(fetch_companion(item_id), item_id)
+            if more:
+                record = existing.setdefault(item_id, {'id':item_id,
+                    'name':names.get(item_id, f'Item #{item_id}'),
+                    'source':'Recipe catalog',
+                    'sourceUrl':f'https://ahledger.com/items/{item_id}'})
+                record.update(more)
+                tooltip_attempts.pop(item_id, None)
+                tooltip_added += 1
+            else:
+                tooltip_attempts[item_id] = now.isoformat()
+                tooltip_missing += 1
+        except (HTTPError, URLError, ValueError, TimeoutError) as ex:
+            tooltip_attempts[item_id] = now.isoformat()
+            tooltip_missing += 1
+            if isinstance(ex, HTTPError) and ex.code == 429:
+                print('Companion rate limit reached: pausing tooltip enrichment')
+                break
+        time.sleep(.55)
+    print(f'Tooltip enrichment: {tooltip_added} with lines, {tooltip_missing} unavailable; coverage is partial', flush=True)
+    if new_count == 0 and not existing:
+        sys.exit(f'Item API returned no usable item records ({failures} failed). Check response schema and availability; refusing a misleading successful workflow.')
     output = {
         'schema': 1, 'provider':'AHledger',
         'attribution':'Item metadata by AHledger — https://ahledger.com',
         'generatedAt':dt.datetime.now(dt.timezone.utc).isoformat(),
         'count':len(existing), 'knownRecipeItemIds':len(ids), 'unresolved':unresolved,
+        'tooltipAttempts':tooltip_attempts,
+        'withProperties':sum(bool(set(i) & {'quality','itemLevel','requiredLevel','itemClass','subclass','bagSlots','description'}) for i in existing.values()),
+        'withTooltips':sum(bool(i.get('tooltipLines')) for i in existing.values()),
         'items':sorted(existing.values(), key=lambda o:int(o['id']))
     }
     OUTPUT.parent.mkdir(parents=True,exist_ok=True)
