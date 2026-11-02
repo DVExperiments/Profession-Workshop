@@ -24,6 +24,15 @@
 .itemLibraryDetail .codexBadge{background:#442f26;color:#f8d38a;padding:4px 7px;font:11px Georgia,serif;display:inline-block;margin:3px}
 .wowTooltip .tipStat.sourceStat{color:#bbdaf4}
 @media(max-width:870px){.itemsPage{grid-template-columns:1fr}.itemLibraryLayout{grid-template-columns:1fr}.itemLibraryList{max-height:240px}}
+
+.liveTooltipPanel{margin-top:12px;border-top:1px solid #a67b53;padding:12px 2px}
+.liveTooltipPanel>b{display:block;font-size:1.15rem;color:#653725}
+.liveTooltipHelp{display:block;color:#76583d;font-size:.85rem;margin:5px 0}
+.liveTooltipBody{background:#1b1620;color:#e8dfce;border:2px solid #a78048;border-radius:5px;padding:12px;margin:8px 0;min-height:42px;font-family:Georgia,serif}
+.liveTooltipText{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;color:#efe2cc;line-height:1.55;margin:0}
+.liveTooltipError{color:#ffcc9a}
+.liveTooltipActions{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.liveTooltipActions a{color:#70402b;text-decoration:underline}
 </style><link rel="stylesheet" href="journal.css"></head>
 <body><div class="wrap"><header class="mast"><div class="branding"><div class="sigil" aria-hidden="true">⚒</div><div><div class="eyebrow">Azeroth field tools · independent fan project</div><h1>Profession Workshop</h1><div class="subhead">Every great item starts with a handful of reagents.</div></div></div><div class="tools"><span class="status" id="datasetStatus">Checking local catalog…</span><button id="refresh" class="button">↻ Refresh snapshot</button><button id="backup" class="button">↓ Backup</button><button id="restore" class="button">↑ Restore</button><input id="restoreFile" type="file" accept=".json,application/json" hidden></div><nav class="journalNav" aria-label="Workshop pages"><button class="navPage active" data-page="workshop">⚒ Workshop</button><button class="navPage" data-page="bank">▣ My Bank <span id="bankNavCount"></span></button><button class="navPage" data-page="favorites">★ Favourite Recipes <span id="favNavCount"></span></button><button class="navPage" data-page="items">📖 Item Library <span id="itemNavCount"></span></button></nav></header>
 <div id="workshopPage" class="layout"><aside class="panel"><h2>Recipe Grimoire</h2><div class="field"><label for="search">Search items or spells</label><input id="search" placeholder="Name, material, profession…" autocomplete="off"></div><div class="field"><label for="profession">Profession</label><select id="profession"><option value="">All professions</option></select></div><div class="sectionBar"><span class="kicker" id="listCount">0 recipes</span><button class="button small" id="customAdd">+ Custom recipe</button></div><div class="scroll" id="recipeList" aria-label="Recipe results"></div><div id="catalogNotice" class="notice">Loading catalog…</div></aside>
@@ -377,6 +386,68 @@ itemDetailsHTML=function(name,profession=''){
 };
 const _previousApplyCatalog=applyCatalog;
 applyCatalog=function(raw,from){_previousApplyCatalog(raw,from);buildLibraryIndex();renderItemLibrary()};
+
+// v1.1: On-demand item tooltip lookup. This complements metadata snapshots.
+// Warcraft DB documents a CORS-enabled public tooltip API; availability of
+// individual Forever records is checked at request time, not presumed.
+const liveTooltipCache=new Map(), liveTooltipPending=new Map();
+const LIVE_CACHE_KEY='profession-workshop-live-tooltips-v11';
+try{const saved=JSON.parse(localStorage.getItem(LIVE_CACHE_KEY)||'{}');for(const [k,v] of Object.entries(saved)){if(v&&v.text)liveTooltipCache.set(k,v)}}catch(_){}
+function persistLiveTooltips(){try{const entries=[...liveTooltipCache.entries()].slice(-140);localStorage.setItem(LIVE_CACHE_KEY,JSON.stringify(Object.fromEntries(entries)))}catch(_){}}
+function decodeTooltipHTML(html){
+ const doc=new DOMParser().parseFromString(String(html||''),'text/html');
+ doc.querySelectorAll('script,style,svg,iframe,object,form').forEach(e=>e.remove());
+ // Preserve visible tooltip lines without trusting remote markup for rendering.
+ doc.querySelectorAll('br,hr').forEach(el=>el.replaceWith(doc.createTextNode('\n')));
+ doc.querySelectorAll('p,li,tr,div').forEach(el=>el.appendChild(doc.createTextNode('\n')));
+ return (doc.body.textContent||'').replace(/\u00a0/g,' ').split(/\n/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean).join('\n').slice(0,3500);
+}
+function liveItemId(name,id){if(id&&/^\d+$/.test(String(id)))return String(id);const rec=itemRecord(name,id);return rec&&/^\d+$/.test(String(rec.id))?String(rec.id):''}
+function liveTooltipPanel(name,id){
+ const sid=liveItemId(name,id);if(!sid)return '<p class="liveTooltipHelp">No item ID is available for this recipe. A live tooltip lookup is not possible.</p>';
+ const entry=liveTooltipCache.get(sid);
+ const source='https://forever.warcraftdb.com/data/item/'+encodeURIComponent(sid);
+ return `<div class="detailGroup liveTooltipPanel" data-live-id="${esc(sid)}"><b>In-game item description</b><small class="liveTooltipHelp">Forever Warcraft DB · external public tooltip service</small><div class="liveTooltipBody">${entry?`<pre class="liveTooltipText">${esc(entry.text)}</pre>`:'Checking for a detailed item tooltip…'}</div><div class="liveTooltipActions"><button type="button" class="button small" data-live-retry="${esc(sid)}">${entry?'Refresh tooltip':'Try again'}</button><a href="${source}" target="_blank" rel="noopener noreferrer">Open item source ↗</a></div></div>`;
+}
+async function fetchLiveTooltip(id,force=false){
+ const sid=String(id);if(!force&&liveTooltipCache.has(sid))return liveTooltipCache.get(sid);
+ if(liveTooltipPending.has(sid))return liveTooltipPending.get(sid);
+ const job=(async()=>{
+  const url='https://forever.warcraftdb.com/api/v1/tooltip/item/'+encodeURIComponent(sid);
+  const response=await fetch(url,{mode:'cors',cache:'no-store'});
+  if(!response.ok)throw Error('Source HTTP '+response.status);
+  const data=await response.json();
+  const raw=typeof data==='string'?data:(data.html||data.tooltip?.html||data.data?.html||'');
+  const content=decodeTooltipHTML(raw);
+  if(!content||content.length<8)throw Error('No usable tooltip returned for this item');
+  const result={text:content,source:url,checkedAt:new Date().toISOString()};
+  liveTooltipCache.delete(sid);liveTooltipCache.set(sid,result);persistLiveTooltips();return result;
+ })().finally(()=>liveTooltipPending.delete(sid));
+ liveTooltipPending.set(sid,job);return job;
+}
+async function hydrateLivePanels(container,force=false){
+ if(!container)return;
+ for(const panel of container.querySelectorAll('[data-live-id]')){
+  const sid=panel.dataset.liveId,body=panel.querySelector('.liveTooltipBody');
+  if(!sid||!body)continue;
+  if(!force&&liveTooltipCache.has(sid)){body.innerHTML='<pre class="liveTooltipText">'+esc(liveTooltipCache.get(sid).text)+'</pre>';continue}
+  body.textContent='Looking up item '+sid+'…';
+  try{
+   const result=await fetchLiveTooltip(sid,force);
+   if(panel.isConnected)body.innerHTML='<pre class="liveTooltipText">'+esc(result.text)+'</pre>';
+  }catch(e){
+   if(panel.isConnected)body.innerHTML='<span class="liveTooltipError">No live description available ('+esc(e.message)+').</span><p class="liveTooltipHelp">This is a source/network limitation, not missing recipe data. Use the item-source link or try later. Your locally imported properties remain available above.</p>';
+  }
+ }
+}
+const _v11RenderPlan=renderPlan;
+renderPlan=function(){_v11RenderPlan();const recipe=allRecipes().find(r=>r.key===state.selected);if(recipe){$('itemDetails').insertAdjacentHTML('beforeend',liveTooltipPanel(recipe.name,recipe.itemId));hydrateLivePanels($('itemDetails'))}};
+const _v11RenderLibrary=renderItemLibrary;
+renderItemLibrary=function(){_v11RenderLibrary();const item=libraryIndex.find(i=>i.key===librarySelected);if(item){$('itemLibraryDetail').insertAdjacentHTML('beforeend',liveTooltipPanel(item.name,item.id));hydrateLivePanels($('itemLibraryDetail'))}};
+for(const page of ['itemLibraryDetail','itemDetails']){
+ $(page).addEventListener('click',e=>{const b=e.target.closest('[data-live-retry]');if(!b)return;const panel=b.closest('[data-live-id]');if(panel)hydrateLivePanels({querySelectorAll:()=>[panel]},true)});
+}
+
 // When an updated recipe snapshot lands, the metadata remains independent.
 renderAll();buildLibraryIndex();renderItemLibrary();loadCatalog();loadItemData();
 
