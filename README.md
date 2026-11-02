@@ -1,10 +1,21 @@
-# Profession Workshop v0.5
+# Profession Workshop v0.6
 
 A standalone, unofficial companion crafting planner for **World of Warcraft: Forever**, designed for GitHub Pages. Inspired by classic fantasy crafting interfaces. No login, developer API key, server or npm build required.
 
-## Journal visual redesign (v0.5)
+## Quest journal interface
 
 The app has been redesigned to match the parchment-and-leather quest journal mockup: two-page journal, embellished header, aged parchment, leather textures, brass-framed controls and parchment subpanels. The working v0.3 planner remains intact. Upload **`journal.css` and the entire `assets/` directory** alongside `index.html` or the journal styling will not render correctly. Assets are part of this package and do not rely on third-party image servers.
+
+## Version 0.6 — My Bank
+
+- New **My Bank** page in the journal header; add or edit bank items with category and quantity.
+- **My Bags** remains separate from bank storage. Both sources of stock are accounted for once when calculating crafting trees and missing materials.
+- Search and filter your bank, and use **Can I craft it?** to find recipe batches covered by your bags and bank. The list relies on recipe relationships in your deployed snapshot and does not include uncertain disenchant output.
+- **Disenchant & salvage** lets you document possible outputs, per-item ranges and sources. These are explicitly unverified *manual notes*, not automatic drop tables; potential outputs are never credited as owned resources.
+- Profession dropdown options now use dark brown text on light parchment backgrounds for contrast.
+- Backups now include bank quantities, item categories and disenchant/salvage notes. Existing v0.3 backups still restore.
+
+**IMPORTANT when updating an existing GitHub repository:** keep your current populated `data/recipes.json`. The v0.6 update ZIP deliberately **does not include** that file so uploading the ZIP cannot replace your 2,144-recipe snapshot with an empty placeholder. Leave the GitHub Actions workflow intact. Upload all the other files to the same paths.
 
 ## What works
 
@@ -18,7 +29,7 @@ The app has been redesigned to match the parchment-and-leather quest journal moc
 
 ## Important data setup
 
-This ZIP intentionally includes an **empty** `data/recipes.json`. The developer environment could verify AHledger's documented API but could **not fetch the JSON body**, so a full catalog has **not** been presented as downloaded or verified. Run the import workflow in your repository to populate the real client-extracted recipes. No invented recipes are included.
+Earlier ZIPs included an **empty** `data/recipes.json`; this v0.6 update ZIP intentionally omits it to preserve your existing published catalog. The developer environment could verify AHledger's documented API but could **not fetch the JSON body**, so a full catalog has **not** been presented as downloaded or verified. Run the import workflow in your repository to populate the real client-extracted recipes. No invented recipes are included.
 
 1. Upload **all contents of this folder**, including `.github/workflows/update-recipes.yml`, `scripts/update_recipes.py`, `data/recipes.json`, and `index.html` to your repository root. If you upload via GitHub's web UI, make sure hidden `.github` contents are included.
 2. In **Settings → Pages**, select *Deploy from a branch*, branch `main`, folder `/ (root)`.
@@ -58,3 +69,14 @@ AHledger's API sends an `Access-Control-Allow-Origin` header for another origin.
 If the Action fails: open **Actions → Update Forever recipe snapshot → latest run** and inspect the Python importer log. The exporter will never silently fill the catalog with invented entries. Verify the repository contains `data/recipes.json` with a nonzero `count`. GitHub Pages may take a little time to deploy after the commit.
 
 If you see an HTTP 404 for a file, check that `data/recipes.json`, `journal.css`, and `assets/` are in the deployed repository root, preserving their names and folder structures.
+
+## v0.7 — Item purposes and automatic disenchant reference
+
+- A **What does this item do?** panel appears when a recipe is selected. Familiar Classic bags show a **labelled Classic slot count**, never a claim of verified Forever capacity. New/unrecognised bags show **unknown**. Other recipes identify broad roles (consumable, equipment, reagent) and list known **used-in recipes** from the loaded catalog; precise effects/stats are not fabricated.
+- My Bank → **Details** lets players enter an item's **quality**, **armour/weapon type**, and **required character level** from its tooltip. This metadata is saved in local browser storage and backup/restore.
+- My Bank → **Disenchant & salvage** now suggests possible dust/essence/shard/crystal materials from a built-in Classic-derived reference table. For uncommon gear, dust/essence/shard outcomes are **mutually exclusive possibilities** with approximate chance labels. Rare/epic results are high-level approximations. These numbers are *not measured Forever drop rates*, and no uncertain outputs are automatically added to inventory.
+- Manual salvage notes remain available for player-observed outcomes. A player can mark an item **not disenchantable**. Unknown quality, type, or required level causes the estimator to ask for details instead of guessing.
+
+Reference: https://www.wow-professions.com/forever/disenchanting-guide and https://forevermastery.com/en/tools/disenchant ; Classic bags https://www.wowhead.com/classic/guide/classic-wow-bags-storage ; Forever bag caveat https://senseos.gg/guides/wow-forever/bags-and-bank/ .
+
+**Publishing:** upload the v0.7 ZIP contents, but keep your current `data/recipes.json` untouched (it is intentionally excluded from the upgrade ZIP). No additional API keys or GitHub Actions changes are needed.
